@@ -1,0 +1,181 @@
+-- Prevent old hub overlap
+if getgenv().BIG_HUB_RUNNING then
+    warn("Restarting hub...")
+    getgenv().BIG_HUB_RUNNING = false
+    task.wait(1)
+end
+getgenv().BIG_HUB_RUNNING = true
+
+-- Services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+
+local player = Players.LocalPlayer
+
+-- Config positions
+local lobbyCFrame = CFrame.new(-2500,0,2500)
+local towerExitCFrame = CFrame.new(-2508.806, -348.512, 2680.211)
+local trialExitCFrame = CFrame.new(-2575.984, -262.103, 1653.922)
+local trialStartCFrame = CFrame.new(-2644.199, -260.904, 1649.696)
+local savedPosition = nil
+
+-- Tower / Trial Values
+local towerValues = ReplicatedStorage:WaitForChild("Gamemodes"):WaitForChild("Tower")
+local towerWave = towerValues:WaitForChild("Wave")
+local towerOpen = towerValues:WaitForChild("Open")
+
+local trialValues = ReplicatedStorage:WaitForChild("Gamemodes"):WaitForChild("Trial")
+local trialWave = trialValues:WaitForChild("Wave")
+local trialOpen = trialValues:WaitForChild("Open")
+
+-- States
+local autoTowerEnabled, autoTrialEnabled = false, false
+local autoLeaveEnabled, spinEnabled = false, false
+local inTower, inTrial = false, false
+local waitingForExit, canAutoJoin = false, true
+local leaveTowerWave, leaveTrialWave = 6, 6
+
+-- Helper
+local function getBridge()
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    return remotes and remotes:FindFirstChild("Bridge")
+end
+
+-- Click Yes
+local function clickYes()
+    pcall(function()
+        local confirmUI = player:WaitForChild("PlayerGui"):FindFirstChild("ConfirmUI")
+        if not confirmUI then return end
+        local yesButton = confirmUI.Offset.Frame.Frame.Buttons:WaitForChild("Yes")
+        local clickable = yesButton:FindFirstChildWhichIsA("TextButton",true) or yesButton:FindFirstChildWhichIsA("ImageButton",true)
+        if clickable then firesignal(clickable.MouseButton1Click) end
+    end)
+end
+
+-- Leave Tower
+local function leaveTower()
+    if not autoLeaveEnabled or waitingForExit then return end
+    waitingForExit=true
+    inTower=false
+    canAutoJoin=false
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then hrp.CFrame = towerExitCFrame end
+    task.delay(1.5, clickYes)
+    task.delay(2, function() if savedPosition and hrp then hrp.CFrame = savedPosition end end)
+    task.delay(3, function() canAutoJoin=true; waitingForExit=false end)
+end
+
+-- Leave Trial
+local function leaveTrial()
+    if not autoLeaveEnabled or waitingForExit then return end
+    waitingForExit=true
+    inTrial=false
+    canAutoJoin=false
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then hrp.CFrame = trialExitCFrame end
+    task.delay(1.5, clickYes)
+    task.delay(2, function() if savedPosition and hrp then hrp.CFrame = savedPosition end end)
+    task.delay(3, function() canAutoJoin=true; waitingForExit=false end)
+end
+
+-- Tower & Trial auto join loop
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        -- Trial has priority
+        if autoTrialEnabled and trialOpen.Value and not inTrial and canAutoJoin then
+            local bridge = getBridge()
+            if bridge then
+                pcall(function() bridge:FireServer("Gamemodes","Trial","Start") end)
+                task.wait(1)
+                pcall(function() bridge:FireServer("Gamemodes","Trial","Join") end)
+                task.wait(1)
+                local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then hrp.CFrame = trialStartCFrame; print("Teleported to Trial start") end
+                inTrial=true
+            end
+        elseif autoTowerEnabled and not inTrial and canAutoJoin and not inTower then
+            local bridge = getBridge()
+            if bridge then
+                if not towerOpen.Value then pcall(function() bridge:FireServer("Gamemodes","Tower","Start") end); task.wait(1) end
+                pcall(function() bridge:FireServer("Gamemodes","Tower","Join") end)
+                inTower=true
+            end
+        end
+    end
+end)
+
+-- Auto Leave Listeners
+towerWave:GetPropertyChangedSignal("Value"):Connect(function()
+    if inTower and autoLeaveEnabled and towerWave.Value>=leaveTowerWave then
+        leaveTower()
+    end
+end)
+trialWave:GetPropertyChangedSignal("Value"):Connect(function()
+    if inTrial and autoLeaveEnabled and trialWave.Value>=leaveTrialWave then
+        leaveTrial()
+    end
+end)
+
+-- Save Position
+RunService.Heartbeat:Connect(function()
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and not inTower and not inTrial then
+        savedPosition = player.Character.HumanoidRootPart.CFrame
+    end
+end)
+
+-- Stars auto-spin
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if spinEnabled then
+            local bridge = getBridge()
+            if bridge then pcall(function() bridge:FireServer("General","Star","Open") end) end
+        end
+    end
+end)
+
+-- Auto AFK
+task.spawn(function()
+    print("Anti AFK activated")
+    while true do
+        task.wait(60)
+        pcall(function() game:GetService("VirtualUser"):ClickButton2(Vector2.new(0,0)) end)
+    end
+end)
+
+-- Rayfield GUI
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Tower Hub",
+    LoadingTitle = "Tower Automation",
+    LoadingSubtitle = "by B.I.G",
+    Theme = "Default",
+    ToggleUIKeybind = "K",
+    ConfigurationSaving={Enabled=true, FileName="BIG_Hub_Config"}
+})
+
+-- Tower Tab
+local TowerTab = Window:CreateTab("🏰 Tower", nil)
+TowerTab:CreateToggle({Name="Auto Tower Join", CurrentValue=false, Flag="AutoTowerJoin", Callback=function(v) autoTowerEnabled=v end})
+TowerTab:CreateToggle({Name="Auto Leave Tower", CurrentValue=false, Flag="AutoLeaveTower", Callback=function(v) autoLeaveEnabled=v end})
+TowerTab:CreateSlider({Name="Leave Wave", Range={1,50}, Increment=1, Suffix="Wave", CurrentValue=leaveTowerWave, Flag="LeaveTowerWaveSlider", Callback=function(v) leaveTowerWave=v end})
+
+-- Trial Tab
+local TrialTab = Window:CreateTab("🔥 Trial", nil)
+TrialTab:CreateToggle({Name="Auto Trial Join", CurrentValue=false, Flag="AutoTrialJoin", Callback=function(v) autoTrialEnabled=v end})
+TrialTab:CreateToggle({Name="Auto Leave Trial", CurrentValue=false, Flag="AutoLeaveTrial", Callback=function(v) autoLeaveEnabled=v end})
+TrialTab:CreateSlider({Name="Leave Wave", Range={1,50}, Increment=1, Suffix="Wave", CurrentValue=leaveTrialWave, Flag="LeaveTrialWaveSlider", Callback=function(v) leaveTrialWave=v end})
+
+-- Stars Tab
+local StarsTab = Window:CreateTab("⭐ Stars", nil)
+StarsTab:CreateToggle({Name="Auto Star Spin", CurrentValue=false, Flag="AutoStarSpin", Callback=function(v) spinEnabled=v end})
+
+-- Rejoin Tab
+local RejoinTab = Window:CreateTab("🔄 Rejoin", nil)
+RejoinTab:CreateButton({Name="Rejoin Current Server", Callback=function()
+    TeleportService:Teleport(game.PlaceId, player)
+end})
