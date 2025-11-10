@@ -57,7 +57,7 @@ local function clickYes()
     end)
 end
 
--- Leave Tower (Optimized with task.wait for stability)
+-- Leave Tower (Updated for consistent 3-second delay)
 local function leaveTower()
     if not autoLeaveEnabled or waitingForExit then return end
     waitingForExit=true
@@ -74,14 +74,14 @@ local function leaveTower()
             
             if savedPosition then hrp.CFrame = savedPosition end
             
-            task.wait(1.5) -- Final delay before re-enabling auto-join
+            task.wait(3) -- 3 seconds before re-enabling auto-join
             canAutoJoin=true
             waitingForExit=false
         end)
     end
 end
 
--- Leave Trial (Optimized with 2-step teleport and task.wait)
+-- Leave Trial (Updated for observed sequencing: TP -> Wait -> Click -> Wait -> TP to Lobby -> 3s Wait)
 local function leaveTrial()
     if not autoLeaveEnabled or waitingForExit then return end
     waitingForExit=true
@@ -91,18 +91,22 @@ local function leaveTrial()
     
     if hrp then 
         task.spawn(function()
-            -- Step 1: Move to Trial_Exit and click 'Yes'
+            -- Step 1: Move to Trial_Exit (This triggers the confirmation UI)
             hrp.CFrame = trialExitCFrame
+
+            task.wait(1) -- Wait for the confirmation UI to appear/be active
+            
+            -- Step 2: Confirm Exit (Must happen while at the exit CFrame)
             clickYes() 
             
-            task.wait(1.5) -- Wait for client to register the exit point and confirm UI to appear
-            
-            -- Step 2: Return to Lobby/Trial_Return
+            task.wait(1.5) -- Wait for the game to process the confirmation/teleport
+
+            -- Step 3: Return to Lobby/Trial_Return (The second teleport)
             hrp.CFrame = trialReturnCFrame
             
-            task.wait(1.5) -- Wait for player to settle in the lobby
+            task.wait(3) -- **The required 3-second wait before Tower/Trial can resume**
             
-            -- Step 3: Restore Saved Position and re-enable auto-join logic
+            -- Step 4: Final cleanup
             if savedPosition then hrp.CFrame = savedPosition end
             canAutoJoin=true
             waitingForExit=false
