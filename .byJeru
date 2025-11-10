@@ -54,68 +54,127 @@ local function clickYes()
     end)
 end
 
--- Leave Tower
+-- Leave Tower (Blocking)
 local function leaveTower()
-    if not autoLeaveEnabled or waitingForExit then return end
+    if waitingForExit then return end -- Prevent stacking
     waitingForExit=true
     inTower=false
     canAutoJoin=false
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if hrp then hrp.CFrame = towerExitCFrame end
-    task.delay(1.5, clickYes)
-    task.delay(2, function() if savedPosition and hrp then hrp.CFrame = savedPosition end end)
-    task.delay(3, function() canAutoJoin=true; waitingForExit=false end)
+    
+    print("Leaving Tower...")
+    if hrp then 
+        pcall(function() hrp.CFrame = towerExitCFrame end)
+    end
+    
+    task.wait(3) -- "Exit 3sec" wait
+    pcall(clickYes) -- Use pcall for safety
+
+    task.wait(3) -- "tp 3 sec" wait
+    if savedPosition and hrp then 
+        pcall(function() hrp.CFrame = savedPosition end)
+    end
+
+    task.wait(1) -- Extra buffer
+    canAutoJoin=true
+    waitingForExit=false
+    print("Leave Tower complete.")
 end
 
--- Leave Trial
+-- Leave Trial (Blocking)
 local function leaveTrial()
-    if not autoLeaveEnabled or waitingForExit then return end
+    if waitingForExit then return end -- Prevent stacking
     waitingForExit=true
     inTrial=false
     canAutoJoin=false
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if hrp then hrp.CFrame = trialExitCFrame end
-    task.delay(1.5, clickYes)
-    task.delay(2, function() if savedPosition and hrp then hrp.CFrame = savedPosition end end)
-    task.delay(3, function() canAutoJoin=true; waitingForExit=false end)
+    
+    print("Leaving Trial...")
+    if hrp then 
+        pcall(function() hrp.CFrame = trialExitCFrame end)
+    end
+    
+    task.wait(3) -- "Exit 3sec" wait
+    pcall(clickYes) -- Use pcall for safety
+
+    task.wait(3) -- "tp 3 sec" wait
+    if savedPosition and hrp then 
+        pcall(function() hrp.CFrame = savedPosition end)
+    end
+
+    task.wait(1) -- Extra buffer
+    canAutoJoin=true
+    waitingForExit=false
+    print("Leave Trial complete.")
 end
 
 -- Tower & Trial auto join loop
 task.spawn(function()
-    while true do
-        task.wait(0.5)
-        -- Trial has priority
-        if autoTrialEnabled and trialOpen.Value and not inTrial and canAutoJoin then
-            local bridge = getBridge()
-            if bridge then
+    while getgenv().BIG_HUB_RUNNING do -- Use the main running flag to stop the loop
+        task.wait(3) -- Loop delay
+        
+        if waitingForExit or not canAutoJoin then continue end -- Don't do anything if we are busy
+
+        local bridge = getBridge()
+        if not bridge then continue end
+
+        -- Priority 1: Trial
+        if autoTrialEnabled and trialOpen.Value then
+            if inTower then
+                -- Trial is open, but we are in the tower. Force leave tower.
+                print("Trial is available. Forcing exit from Tower.")
+                leaveTower() -- This is a blocking call. Loop will pause here.
+                -- After leaveTower() finishes, canAutoJoin will be true,
+                -- and the loop will re-run. Next iteration, it will hit the 'elseif not inTrial' block.
+            
+            elseif not inTrial then
+                -- Trial is open, we are not in tower, and not in trial. Join.
+                print("Joining Trial...")
+                canAutoJoin = false -- Prevent other actions
                 pcall(function() bridge:FireServer("Gamemodes","Trial","Start") end)
-                task.wait(1)
+                task.wait(3) -- "Join wait 3sec"
                 pcall(function() bridge:FireServer("Gamemodes","Trial","Join") end)
-                task.wait(1)
+                task.wait(3) -- Wait after join
+                
                 local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then hrp.CFrame = trialStartCFrame; print("Teleported to Trial start") end
+                if hrp then 
+                    pcall(function() hrp.CFrame = trialStartCFrame end)
+                    print("Teleported to Trial start") 
+                end
                 inTrial=true
+                canAutoJoin = true -- Ready for next action (e.g., auto-leave)
             end
-        elseif autoTowerEnabled and not inTrial and canAutoJoin and not inTower then
-            local bridge = getBridge()
-            if bridge then
-                if not towerOpen.Value then pcall(function() bridge:FireServer("Gamemodes","Tower","Start") end); task.wait(1) end
-                pcall(function() bridge:FireServer("Gamemodes","Tower","Join") end)
-                inTower=true
+        
+        -- Priority 2: Tower (only if Trial is not wanted or not open)
+        elseif autoTowerEnabled and not inTrial and not inTower then
+            -- Not doing trial, and we want to join tower.
+            print("Joining Tower...")
+            canAutoJoin = false -- Prevent other actions
+            if not towerOpen.Value then 
+                pcall(function() bridge:FireServer("Gamemodes","Tower","Start") end)
+                task.wait(3) -- "Join wait 3sec"
             end
+            pcall(function() bridge:FireServer("Gamemodes","Tower","Join") end)
+            task.wait(3) -- Wait after join
+            
+            inTower=true
+            canAutoJoin = true -- Ready for next action
         end
     end
+    print("Auto join loop stopped.")
 end)
 
 -- Auto Leave Listeners
 towerWave:GetPropertyChangedSignal("Value"):Connect(function()
     if inTower and autoLeaveEnabled and towerWave.Value>=leaveTowerWave then
-        leaveTower()
+        print("Auto-leaving tower due to wave limit.")
+        leaveTower() -- This will now block, which is fine.
     end
 end)
 trialWave:GetPropertyChangedSignal("Value"):Connect(function()
     if inTrial and autoLeaveEnabled and trialWave.Value>=leaveTrialWave then
-        leaveTrial()
+        print("Auto-leaving trial due to wave limit.")
+        leaveTrial() -- This will now block, which is fine.
     end
 end)
 
@@ -128,8 +187,8 @@ end)
 
 -- Stars auto-spin
 task.spawn(function()
-    while true do
-        task.wait(0.5)
+    while getgenv().BIG_HUB_RUNNING do
+        task.wait()
         if spinEnabled then
             local bridge = getBridge()
             if bridge then pcall(function() bridge:FireServer("General","Star","Open") end) end
@@ -140,7 +199,7 @@ end)
 -- Auto AFK
 task.spawn(function()
     print("Anti AFK activated")
-    while true do
+    while getgenv().BIG_HUB_RUNNING do
         task.wait(60)
         pcall(function() game:GetService("VirtualUser"):ClickButton2(Vector2.new(0,0)) end)
     end
